@@ -3,9 +3,11 @@ import logging
 from datetime import datetime
 from pymilvus import connections, Collection, utility
 from services.embedding_service import EmbeddingService
-from utils.config import VectorDBProvider, MILVUS_CONFIG
+from utils.config import VectorDBProvider, MILVUS_CONFIG, CHROMA_CONFIG
 import os
 import json
+import chromadb
+from chromadb.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +23,10 @@ class SearchService:
         """
         self.embedding_service = EmbeddingService()
         self.milvus_uri = MILVUS_CONFIG["uri"]
+        self.chroma_persist_dir = CHROMA_CONFIG["persist_directory"]
         self.search_results_dir = "04-search-results"
         os.makedirs(self.search_results_dir, exist_ok=True)
+        os.makedirs(self.chroma_persist_dir, exist_ok=True)
 
     def get_providers(self) -> List[Dict[str, str]]:
         """
@@ -32,7 +36,8 @@ class SearchService:
             List[Dict[str, str]]: 支持的向量数据库提供商列表
         """
         return [
-            {"id": VectorDBProvider.MILVUS.value, "name": "Milvus"}
+            {"id": VectorDBProvider.MILVUS.value, "name": "Milvus"},
+            {"id": VectorDBProvider.CHROMA.value, "name": "Chroma"}
         ]
 
     def list_collections(self, provider: str = VectorDBProvider.MILVUS.value) -> List[Dict[str, Any]]:
@@ -49,32 +54,44 @@ class SearchService:
             Exception: 连接或查询集合时发生错误
         """
         try:
-            connections.connect(
-                alias="default",
-                uri=self.milvus_uri
-            )
-            
-            collections = []
-            collection_names = utility.list_collections()
-            
-            for name in collection_names:
-                try:
-                    collection = Collection(name)
+            if provider == VectorDBProvider.MILVUS.value:
+                connections.connect(
+                    alias="default",
+                    uri=self.milvus_uri
+                )
+                
+                collections = []
+                collection_names = utility.list_collections()
+                
+                for name in collection_names:
+                    try:
+                        collection = Collection(name)
+                        collections.append({
+                            "id": name,
+                            "name": name,
+                            "count": collection.num_entities
+                        })
+                    except Exception as e:
+                        logger.error(f"Error getting info for collection {name}: {str(e)}")
+                
+                return collections
+            elif provider == VectorDBProvider.CHROMA.value:
+                client = chromadb.PersistentClient(path=self.chroma_persist_dir)
+                collections = []
+                for collection in client.list_collections():
                     collections.append({
-                        "id": name,
-                        "name": name,
-                        "count": collection.num_entities
+                        "id": collection.name,
+                        "name": collection.name,
+                        "count": collection.count()
                     })
-                except Exception as e:
-                    logger.error(f"Error getting info for collection {name}: {str(e)}")
-            
-            return collections
+                return collections
             
         except Exception as e:
             logger.error(f"Error listing collections: {str(e)}")
             raise
         finally:
-            connections.disconnect("default")
+            if provider == VectorDBProvider.MILVUS.value:
+                connections.disconnect("default")
 
     def save_search_results(self, query: str, collection_id: str, results: List[Dict[str, Any]]) -> str:
         """
@@ -123,7 +140,8 @@ class SearchService:
                     top_k: int = 3, 
                     threshold: float = 0.7,
                     word_count_threshold: int = 20,
-                    save_results: bool = False) -> Dict[str, Any]:
+                    save_results: bool = False,
+                    provider: str = VectorDBProvider.MILVUS.value) -> Dict[str, Any]:
         """
         执行向量搜索
         
@@ -134,6 +152,7 @@ class SearchService:
             threshold (float): 相似度阈值，低于此值的结果将被过滤，默认为0.7
             word_count_threshold (int): 文本字数阈值，低于此值的结果将被过滤，默认为20
             save_results (bool): 是否保存搜索结果，默认为False
+            provider (str): 向量数据库提供商，默认为Milvus
             
         Returns:
             Dict[str, Any]: 包含搜索结果的字典，如果保存结果则包含保存路径
@@ -141,6 +160,28 @@ class SearchService:
         Raises:
             Exception: 搜索过程中发生错误
         """
+        try:
+            logger.info(f"Search parameters:")
+            logger.info(f"- Query: {query}")
+            logger.info(f"- Collection ID: {collection_id}")
+            logger.info(f"- Provider: {provider}")
+            logger.info(f"- Top K: {top_k}")
+            logger.info(f"- Threshold: {threshold}")
+            logger.info(f"- Word Count Threshold: {word_count_threshold}")
+
+            if provider == VectorDBProvider.MILVUS.value:
+                return await self._search_milvus(query, collection_id, top_k, threshold, word_count_threshold, save_results)
+            elif provider == VectorDBProvider.CHROMA.value:
+                return await self._search_chroma(query, collection_id, top_k, threshold, word_count_threshold, save_results)
+            else:
+                raise ValueError(f"Unsupported vector database provider: {provider}")
+
+        except Exception as e:
+            logger.error(f"Error performing search: {str(e)}")
+            raise
+
+    async def _search_milvus(self, query: str, collection_id: str, top_k: int, threshold: float, 
+                           word_count_threshold: int, save_results: bool) -> Dict[str, Any]:
         try:
             # 添加参数日志
             logger.info(f"Search parameters:")
@@ -267,4 +308,56 @@ class SearchService:
             logger.error(f"Error performing search: {str(e)}")
             raise
         finally:
-            connections.disconnect("default") 
+            connections.disconnect("default")
+
+    async def _search_chroma(self, query: str, collection_id: str, top_k: int, threshold: float,
+                           word_count_threshold: int, save_results: bool) -> Dict[str, Any]:
+        try:
+            client = chromadb.PersistentClient(path=self.chroma_persist_dir)
+            collection = client.get_collection(collection_id)
+            
+            # 获取查询向量
+            query_embedding = self.embedding_service.create_single_embedding(
+                query,
+                provider="openai",  # 默认使用 OpenAI
+                model="text-embedding-3-small"
+            )
+            
+            # 执行搜索
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=top_k,
+                where={"word_count": {"$gte": word_count_threshold}}
+            )
+            
+            # 处理结果
+            processed_results = []
+            for i, (doc, metadata, distance) in enumerate(zip(results['documents'][0], results['metadatas'][0], results['distances'][0])):
+                score = 1 - distance  # 转换距离为相似度分数
+                if score >= threshold:
+                    processed_results.append({
+                        "text": doc,
+                        "score": float(score),
+                        "metadata": {
+                            "source": metadata.get("document_name", ""),
+                            "page": metadata.get("page_number", ""),
+                            "chunk": metadata.get("chunk_id", ""),
+                            "total_chunks": metadata.get("total_chunks", ""),
+                            "page_range": metadata.get("page_range", ""),
+                            "embedding_provider": metadata.get("embedding_provider", ""),
+                            "embedding_model": metadata.get("embedding_model", ""),
+                            "embedding_timestamp": metadata.get("embedding_timestamp", "")
+                        }
+                    })
+            
+            response_data = {"results": processed_results}
+            
+            if save_results and processed_results:
+                filepath = self.save_search_results(query, collection_id, processed_results)
+                response_data["saved_filepath"] = filepath
+            
+            return response_data
+            
+        except Exception as e:
+            logger.error(f"Error performing Chroma search: {str(e)}")
+            raise 

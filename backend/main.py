@@ -283,16 +283,23 @@ async def get_providers():
 async def get_collections(
     provider: VectorDBProvider = Query(default=VectorDBProvider.MILVUS)
 ):
-    """获取指定向量数据库中的集合"""
+    """获取指定向量数据库中的集合
+    
+    Args:
+        provider: 向量数据库提供商，可选值为 milvus 或 chroma，默认为 milvus
+        
+    Returns:
+        Dict: 包含集合列表的字典
+    """
     try:
         search_service = SearchService()
         collections = search_service.list_collections(provider.value)
         return {"collections": collections}
     except Exception as e:
-        logger.error(f"Error getting collections: {str(e)}")
+        logger.error(f"Error getting collections for provider {provider}: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=str(e)
+            detail=f"Error getting collections for provider {provider}: {str(e)}"
         )
 
 @app.post("/search")

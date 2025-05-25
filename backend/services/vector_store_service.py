@@ -6,7 +6,9 @@ import logging
 from pathlib import Path
 from pymilvus import connections, utility
 from pymilvus import Collection, DataType, FieldSchema, CollectionSchema
-from utils.config import VectorDBProvider, MILVUS_CONFIG  # Updated import
+from utils.config import VectorDBProvider, MILVUS_CONFIG, CHROMA_CONFIG
+import chromadb
+from chromadb.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,7 @@ class VectorDBConfig:
         self.provider = provider
         self.index_mode = index_mode
         self.milvus_uri = MILVUS_CONFIG["uri"]
+        self.chroma_persist_dir = CHROMA_CONFIG["persist_directory"]
 
     def _get_milvus_index_type(self, index_mode: str) -> str:
         """
@@ -49,6 +52,9 @@ class VectorDBConfig:
             对应的Milvus索引参数字典
         """
         return MILVUS_CONFIG["index_params"].get(index_mode, {})
+    
+    def _get_chroma_index_params(self, index_mode: str) -> Dict[str, Any]:
+        return CHROMA_CONFIG["index_params"].get(index_mode, {})
 
 class VectorStoreService:
     """
@@ -61,6 +67,7 @@ class VectorStoreService:
         self.initialized_dbs = {}
         # 确保存储目录存在
         os.makedirs("03-vector-store", exist_ok=True)
+        os.makedirs(CHROMA_CONFIG["persist_directory"], exist_ok=True)
     
     def _get_milvus_index_type(self, config: VectorDBConfig) -> str:
         """
@@ -86,6 +93,9 @@ class VectorStoreService:
         """
         return config._get_milvus_index_params(config.index_mode)
     
+    def _get_chroma_index_params(self, config: VectorDBConfig) -> Dict[str, Any]:
+        return config._get_chroma_index_params(config.index_mode)
+    
     def index_embeddings(self, embedding_file: str, config: VectorDBConfig) -> Dict[str, Any]:
         """
         将嵌入向量索引到向量数据库
@@ -104,7 +114,13 @@ class VectorStoreService:
         
         # 根据不同的数据库进行索引
         if config.provider == VectorDBProvider.MILVUS:
+            logger.info(f"wshj -- Indexing to Milvus: {embeddings_data}")
             result = self._index_to_milvus(embeddings_data, config)
+        elif config.provider == VectorDBProvider.CHROMA:
+            logger.info(f"wshj -- Indexing to Chroma: {embeddings_data}")
+            result = self._index_to_chroma(embeddings_data, config)
+        else:
+            raise ValueError(f"Unsupported vector database provider: {config.provider}")
         
         end_time = datetime.now()
         processing_time = (end_time - start_time).total_seconds()
@@ -284,6 +300,69 @@ class VectorStoreService:
         finally:
             connections.disconnect("default")
 
+    def _index_to_chroma(self, embeddings_data: Dict[str, Any], config: VectorDBConfig) -> Dict[str, Any]:
+        try:
+            # 使用 filename 作为 collection 名称前缀
+            filename = embeddings_data.get("filename", "")
+            base_name = filename.replace('.pdf', '') if filename else "doc"
+            
+            # Ensure the collection name starts with a letter or underscore
+            if not base_name[0].isalpha() and base_name[0] != '_':
+                base_name = f"_{base_name}"
+            
+            # Get embedding provider
+            embedding_provider = embeddings_data.get("embedding_provider", "unknown")
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            collection_name = f"{base_name}_{embedding_provider}_{timestamp}"
+            
+            # 创建 Chroma 客户端
+            client = chromadb.PersistentClient(path=config.chroma_persist_dir)
+            
+            # 准备数据
+            documents = []
+            metadatas = []
+            ids = []
+            embeddings = []
+            
+            for i, emb in enumerate(embeddings_data["embeddings"]):
+                documents.append(str(emb["metadata"].get("content", "")))
+                metadatas.append({
+                    "document_name": embeddings_data.get("filename", ""),
+                    "chunk_id": emb["metadata"].get("chunk_id", 0),
+                    "total_chunks": emb["metadata"].get("total_chunks", 0),
+                    "word_count": emb["metadata"].get("word_count", 0),
+                    "page_number": str(emb["metadata"].get("page_number", 0)),
+                    "page_range": str(emb["metadata"].get("page_range", "")),
+                    "embedding_provider": embeddings_data.get("embedding_provider", ""),
+                    "embedding_model": embeddings_data.get("embedding_model", ""),
+                    "embedding_timestamp": str(emb["metadata"].get("embedding_timestamp", ""))
+                })
+                ids.append(f"doc_{i}")
+                embeddings.append([float(x) for x in emb.get("embedding", [])])
+            
+            # 创建集合
+            collection = client.create_collection(
+                name=collection_name,
+                metadata={"hnsw:space": "cosine"} if config.index_mode == "hnsw" else {}
+            )
+            
+            # 添加数据
+            collection.add(
+                documents=documents,
+                metadatas=metadatas,
+                ids=ids,
+                embeddings=embeddings
+            )
+            
+            return {
+                "index_size": len(documents),
+                "collection_name": collection_name
+            }
+            
+        except Exception as e:
+            logger.error(f"Error indexing to Chroma: {str(e)}")
+            raise
+
     def list_collections(self, provider: str) -> List[str]:
         """
         列出指定提供商的所有集合
@@ -301,6 +380,13 @@ class VectorStoreService:
                 return collections
             finally:
                 connections.disconnect("default")
+        elif provider == VectorDBProvider.CHROMA:
+            try:
+                client = chromadb.PersistentClient(path=CHROMA_CONFIG["persist_directory"])
+                return [collection.name for collection in client.list_collections()]
+            except Exception as e:
+                logger.error(f"Error listing Chroma collections: {str(e)}")
+                return []
         return []
 
     def delete_collection(self, provider: str, collection_name: str) -> bool:
@@ -321,6 +407,14 @@ class VectorStoreService:
                 return True
             finally:
                 connections.disconnect("default")
+        elif provider == VectorDBProvider.CHROMA:
+            try:
+                client = chromadb.PersistentClient(path=CHROMA_CONFIG["persist_directory"])
+                client.delete_collection(collection_name)
+                return True
+            except Exception as e:
+                logger.error(f"Error deleting Chroma collection: {str(e)}")
+                return False
         return False
 
     def get_collection_info(self, provider: str, collection_name: str) -> Dict[str, Any]:
@@ -345,4 +439,23 @@ class VectorStoreService:
                 }
             finally:
                 connections.disconnect("default")
+        elif provider == VectorDBProvider.CHROMA:
+            try:
+                client = chromadb.PersistentClient(path=CHROMA_CONFIG["persist_directory"])
+                collection = client.get_collection(collection_name)
+                return {
+                    "name": collection_name,
+                    "num_entities": collection.count(),
+                    "schema": {
+                        "fields": [
+                            {"name": "id", "type": "string"},
+                            {"name": "document", "type": "string"},
+                            {"name": "metadata", "type": "object"},
+                            {"name": "embedding", "type": "vector"}
+                        ]
+                    }
+                }
+            except Exception as e:
+                logger.error(f"Error getting Chroma collection info: {str(e)}")
+                return {}
         return {}
