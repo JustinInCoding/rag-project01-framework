@@ -257,6 +257,7 @@ const LoadFile = () => {
                 <option value="unstructured">Unstructured</option>
                 <option value="pdfplumber">PDFPlumber</option>
                 <option value="tesseract">Tesseract</option>
+                <option value="pypdfdirectoryloader">PyPDFDirectoryLoader</option>
               </select>
             </div>
 

@@ -10,6 +10,7 @@ from pdf2image import convert_from_path
 import pytesseract
 from PIL import Image
 import tempfile
+from langchain.document_loaders import PyPDFDirectoryLoader
 
 logger = logging.getLogger(__name__)
 """
@@ -47,7 +48,7 @@ class LoadingService:
 
         参数:
             file_path (str): PDF文件路径
-            method (str): 加载方法，支持 'pymupdf', 'pypdf', 'pdfplumber', 'unstructured', 'tesseract'
+            method (str): 加载方法，支持 'pymupdf', 'pypdf', 'pdfplumber', 'unstructured', 'tesseract', 'langchain'
             strategy (str, optional): 使用unstructured方法时的策略，可选 'fast', 'hi_res', 'ocr_only'
             chunking_strategy (str, optional): 文本分块策略，可选 'basic', 'by_title'
             chunking_options (dict, optional): 分块选项配置
@@ -71,6 +72,8 @@ class LoadingService:
                 )
             elif method == "tesseract":
                 return self._load_with_tesseract(file_path)
+            elif method == "pypdfdirectoryloader":
+                return self._load_with_pypdfdirectoryloader(file_path)
             else:
                 raise ValueError(f"Unsupported loading method: {method}")
         except Exception as e:
@@ -333,6 +336,63 @@ class LoadingService:
             
         except Exception as e:
             logger.error(f"Tesseract OCR error: {str(e)}")
+            raise
+    
+    def _load_with_pypdfdirectoryloader(self, file_path: str) -> str:
+        """
+        使用 Langchain 的 PyPDFDirectoryLoader 加载 PDF 文档。
+        适合批量处理目录中的 PDF 文件，支持自动提取元数据。
+
+        参数:
+            file_path (str): PDF文件路径或目录路径
+
+        返回:
+            str: 提取的文本内容
+        """
+        text_blocks = []
+        try:
+            # 获取文件所在目录
+            directory = os.path.dirname(file_path)
+            if not directory:
+                directory = "."
+            
+            # 创建 PyPDFDirectoryLoader 实例
+            loader = PyPDFDirectoryLoader(
+                directory,
+                glob="**/*.pdf",  # 递归搜索所有 PDF 文件
+                silent_errors=True  # 忽略加载错误
+            )
+            
+            # 加载文档
+            documents = loader.load()
+            
+            # 处理加载的文档
+            for doc in documents:
+                # 提取页码信息
+                page_number = doc.metadata.get('page', 1)
+                
+                # 提取文本内容
+                text = doc.page_content.strip()
+                if text:
+                    text_blocks.append({
+                        "text": text,
+                        "page": page_number,
+                        "metadata": {
+                            "source": doc.metadata.get('source', ''),
+                            "file_path": doc.metadata.get('file_path', ''),
+                            "total_pages": doc.metadata.get('total_pages', 1),
+                            "loader": "langchain_pypdf"
+                        }
+                    })
+            
+            # 更新页面映射
+            self.current_page_map = text_blocks
+            self.total_pages = max(block["page"] for block in text_blocks) if text_blocks else 0
+            
+            return "\n".join(block["text"] for block in text_blocks)
+            
+        except Exception as e:
+            logger.error(f"Langchain PDF loading error: {str(e)}")
             raise
     
     def save_document(self, filename: str, chunks: list, metadata: dict, loading_method: str, strategy: str = None, chunking_strategy: str = None) -> str:
