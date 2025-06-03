@@ -1,0 +1,76 @@
+{
+  "filename": "黑神话悟空.pdf",
+  "total_chunks": 4,
+  "total_pages": 5,
+  "loading_method": "tesseract",
+  "loading_strategy": null,
+  "chunking_strategy": null,
+  "chunking_method": "loaded",
+  "timestamp": "2025-06-03T21:10:20.245042",
+  "chunks": [
+    {
+      "content": "， 中 ee 事\n\nGAME SCIENCE\n\n游戏 科学",
+      "metadata": {
+        "chunk_id": 1,
+        "page_number": 1,
+        "page_range": "1",
+        "word_count": 8,
+        "ocr_method": "tesseract",
+        "ocr_language": "eng+chi_sim",
+        "dpi": 300,
+        "image_size": [
+          4000,
+          2250
+        ]
+      }
+    },
+    {
+      "content": "医 。 GAME nies\n\n290\n\n序章\n\nCet: 悟空 》 是 一 款 基 于 《西游 记 六 改编 的 中 国 神话 动作 角色 扮演 游戏 ， 玩 家 化 身\n“天 党 世人 ”、， 在 险象 环 生 的 西游 冒险 中 妃 寻 传说 月 后 的 秘密 ，",
+      "metadata": {
+        "chunk_id": 2,
+        "page_number": 2,
+        "page_range": "2",
+        "word_count": 51,
+        "ocr_method": "tesseract",
+        "ocr_language": "eng+chi_sim",
+        "dpi": 300,
+        "image_size": [
+          4000,
+          2250
+        ]
+      }
+    },
+    {
+      "content": "OO\n\nEAP CAN, CRE Sr\n\n重 走 西游 故地， 再 写 神 话 结局\n\nae",
+      "metadata": {
+        "chunk_id": 3,
+        "page_number": 4,
+        "page_range": "4",
+        "word_count": 15,
+        "ocr_method": "tesseract",
+        "ocr_language": "eng+chi_sim",
+        "dpi": 300,
+        "image_size": [
+          4000,
+          2250
+        ]
+      }
+    },
+    {
+      "content": "<~ & 村\n\n相\n在\n何\nA\n\n#8 Oe | Sh KO\n\nCe\nal\n一\n3\nES\nM\nwy\nRS\n\nRar A",
+      "metadata": {
+        "chunk_id": 4,
+        "page_number": 5,
+        "page_range": "5",
+        "word_count": 22,
+        "ocr_method": "tesseract",
+        "ocr_language": "eng+chi_sim",
+        "dpi": 300,
+        "image_size": [
+          4000,
+          2250
+        ]
+      }
+    }
+  ]
+}

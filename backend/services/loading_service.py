@@ -6,6 +6,10 @@ import logging
 import os
 from datetime import datetime
 import json
+from pdf2image import convert_from_path
+import pytesseract
+from PIL import Image
+import tempfile
 
 logger = logging.getLogger(__name__)
 """
@@ -43,7 +47,7 @@ class LoadingService:
 
         参数:
             file_path (str): PDF文件路径
-            method (str): 加载方法，支持 'pymupdf', 'pypdf', 'pdfplumber', 'unstructured'
+            method (str): 加载方法，支持 'pymupdf', 'pypdf', 'pdfplumber', 'unstructured', 'tesseract'
             strategy (str, optional): 使用unstructured方法时的策略，可选 'fast', 'hi_res', 'ocr_only'
             chunking_strategy (str, optional): 文本分块策略，可选 'basic', 'by_title'
             chunking_options (dict, optional): 分块选项配置
@@ -65,6 +69,8 @@ class LoadingService:
                     chunking_strategy=chunking_strategy,
                     chunking_options=chunking_options
                 )
+            elif method == "tesseract":
+                return self._load_with_tesseract(file_path)
             else:
                 raise ValueError(f"Unsupported loading method: {method}")
         except Exception as e:
@@ -264,6 +270,69 @@ class LoadingService:
             return "\n".join(block["text"] for block in text_blocks)
         except Exception as e:
             logger.error(f"pdfplumber error: {str(e)}")
+            raise
+    
+    def _load_with_tesseract(self, file_path: str, dpi: int = 300, lang: str = 'eng+chi_sim') -> str:
+        """
+        使用 pytesseract 和 pdf2image 加载 PDF 文档。
+        适合处理扫描版 PDF 或图片型 PDF，支持 OCR 文字识别。
+
+        参数:
+            file_path (str): PDF文件路径
+            dpi (int): 图像DPI，默认300
+            lang (str): OCR语言，默认'eng'（英语），支持多语言如'eng+chi_sim'（英文+简体中文）
+
+        返回:
+            str: 提取的文本内容
+        """
+        text_blocks = []
+        try:
+            # 创建临时目录存储转换后的图片
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # 将PDF转换为图片
+                logger.info(f"Converting PDF to images with DPI: {dpi}")
+                images = convert_from_path(
+                    file_path,
+                    dpi=dpi,
+                    output_folder=temp_dir,
+                    fmt='png'
+                )
+                
+                self.total_pages = len(images)
+                logger.info(f"Converted {self.total_pages} pages to images")
+                
+                # 对每一页进行OCR识别
+                for page_num, image in enumerate(images, 1):
+                    logger.info(f"Processing page {page_num} with OCR")
+                    
+                    # 使用pytesseract进行OCR识别
+                    text = pytesseract.image_to_string(
+                        image,
+                        lang=lang,
+                        config='--psm 3'  # 自动页面分割模式
+                    )
+                    
+                    if text.strip():
+                        text_blocks.append({
+                            "text": text.strip(),
+                            "page": page_num,
+                            "metadata": {
+                                "ocr_method": "tesseract",
+                                "ocr_language": lang,
+                                "dpi": dpi,
+                                "image_size": image.size
+                            }
+                        })
+                        
+                        logger.info(f"Successfully extracted text from page {page_num}")
+                    else:
+                        logger.warning(f"No text extracted from page {page_num}")
+            
+            self.current_page_map = text_blocks
+            return "\n".join(block["text"] for block in text_blocks)
+            
+        except Exception as e:
+            logger.error(f"Tesseract OCR error: {str(e)}")
             raise
     
     def save_document(self, filename: str, chunks: list, metadata: dict, loading_method: str, strategy: str = None, chunking_strategy: str = None) -> str:
