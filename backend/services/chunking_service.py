@@ -1,6 +1,6 @@
 from datetime import datetime
 import logging
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter, CharacterTextSplitter
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +13,7 @@ class ChunkingService:
     - fixed_size: 按固定大小分块
     - by_paragraphs: 按段落分块
     - by_sentences: 按句子分块
+    - by_characters: 按字符分块
     """
     
     def chunk_text(self, text: str, method: str, metadata: dict, page_map: list = None, chunk_size: int = 1000) -> dict:
@@ -21,7 +22,7 @@ class ChunkingService:
         
         Args:
             text: 原始文本内容
-            method: 分块方法，支持 'by_pages', 'fixed_size', 'by_paragraphs', 'by_sentences'
+            method: 分块方法，支持 'by_pages', 'fixed_size', 'by_paragraphs', 'by_sentences', 'by_characters'
             metadata: 文档元数据
             page_map: 页面映射列表，每个元素包含页码和页面文本
             chunk_size: 固定大小分块时的块大小
@@ -80,6 +81,27 @@ class ChunkingService:
                             "page_number": page_data['page'],
                             "page_range": str(page_data['page']),
                             "word_count": len(chunk["text"].split())
+                        }
+                        chunks.append({
+                            "content": chunk["text"],
+                            "metadata": chunk_metadata
+                        })
+            
+            elif method == "by_character":
+                # 使用 CharacterTextSplitter 进行字符级别的分块
+                for page_data in page_map:
+                    page_chunks = self._character_chunks(
+                        page_data['text'],
+                        chunk_size=chunk_size,
+                        chunk_overlap=metadata.get("chunk_overlap", 200)
+                    )
+                    for chunk in page_chunks:
+                        chunk_metadata = {
+                            "chunk_id": len(chunks) + 1,
+                            "page_number": page_data['page'],
+                            "page_range": str(page_data['page']),
+                            "word_count": len(chunk["text"].split()),
+                            "char_count": len(chunk["text"])
                         }
                         chunks.append({
                             "content": chunk["text"],
@@ -165,3 +187,26 @@ class ChunkingService:
         )
         texts = splitter.split_text(text)
         return [{"text": t} for t in texts]
+
+    def _character_chunks(self, text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> list[dict]:
+        """
+        使用 CharacterTextSplitter 将文本按字符分块
+        
+        Args:
+            text: 要分块的文本
+            chunk_size: 每块的最大字符数
+            chunk_overlap: 块之间的重叠字符数
+            
+        Returns:
+            分块后的文本列表
+        """
+        splitter = CharacterTextSplitter(
+            separator="\n",
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            length_function=len,
+            is_separator_regex=False
+        )
+        
+        texts = splitter.split_text(text)
+        return [{"text": t.strip()} for t in texts if t.strip()]

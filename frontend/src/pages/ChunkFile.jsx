@@ -296,10 +296,11 @@ const ChunkFile = () => {
                 <option value="fixed_size">Fixed Size</option>
                 <option value="by_paragraphs">By Paragraphs</option>
                 <option value="by_sentences">By Sentences</option>
+                <option value="by_character">By Character</option>
               </select>
             </div>
 
-            {chunkingOption === 'fixed_size' && (
+            {(chunkingOption === 'fixed_size' || chunkingOption === 'by_character') && (
               <div className="mb-4">
                 <label className="block text-sm font-medium mb-1">Chunk Size</label>
                 <input
