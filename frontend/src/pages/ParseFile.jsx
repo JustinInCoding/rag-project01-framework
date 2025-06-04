@@ -85,6 +85,8 @@ const ParseFile = () => {
                 <option value="pypdf">PyPDF</option>
                 <option value="unstructured">Unstructured</option>
                 <option value="pdfplumber">PDF Plumber</option>
+                <option value="tesseract">Tesseract</option>
+                <option value="pypdfdirectoryloader">PyPDFDirectoryLoader</option>
               </select>
             </div>
 

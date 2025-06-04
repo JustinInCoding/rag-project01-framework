@@ -5,6 +5,12 @@
 一个从零开始实现的 RAG (Retrieval Augmented Generation) 系统，不依赖现有的 RAG 框架。该项目旨在提供一个轻量级、可定制的知识库问答解决方案。
 ![RAG Frontend](images/RAG-fontend.png)
 
+## Homework
+
+- [x] add `pytesseract+pdf2image` to Load pdf file
+- [x] add `PyPDFDirectoryLoader` to load pdf file
+- [x] add `CharaterTextSplitter` to chunk file
+
 ## 项目概述
 
 本项目是一个完全自主实现的 RAG 系统，通过将文档分块、向量化存储、相似度检索等核心功能模块化实现，使用户能够构建自己的知识库问答系统。

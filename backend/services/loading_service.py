@@ -48,7 +48,7 @@ class LoadingService:
 
         参数:
             file_path (str): PDF文件路径
-            method (str): 加载方法，支持 'pymupdf', 'pypdf', 'pdfplumber', 'unstructured', 'tesseract', 'langchain'
+            method (str): 加载方法，支持 'pymupdf', 'pypdf', 'pdfplumber', 'unstructured', 'tesseract', 'pypdfdirectoryloader'
             strategy (str, optional): 使用unstructured方法时的策略，可选 'fast', 'hi_res', 'ocr_only'
             chunking_strategy (str, optional): 文本分块策略，可选 'basic', 'by_title'
             chunking_options (dict, optional): 分块选项配置
